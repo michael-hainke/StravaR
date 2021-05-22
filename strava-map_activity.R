@@ -9,6 +9,10 @@ library(gganimate)  # animate maps
 library(av)         # video rendering
 library(googleway)  # decode polylines
 library(tidyverse)  # data manipulation
+library(rayshader)   
+library(rayvista)   # devtools::install_github("h-a-graham/rayvista")
+library(rgdal)      # rayshader
+library(geosphere)  # calculate distances
 
 #############################
 ### Strava Authentication ###
@@ -64,9 +68,9 @@ while (!done) {
 
 df <- rbind_pages(df_list)
 
-#################
-### Map Route ###
-#################
+###############################
+### Map Route - Google Maps ###
+###############################
 
 activity_id = 1813153282
 
@@ -90,7 +94,7 @@ p <- ggmap(get_googlemap(center = c(lon = mean(route_df$location.lng), lat = mea
                          scale = 1,
                          maptype ='terrain',
                          color = 'color')) +
-  geom_path(aes(x = location.lng, y = location.lat, colour = elevation), data = route_df, size = 2, alpha = 1) +
+  geom_path(aes(x = location.lng, y = location.lat, colour = elevation), data = route_df, size = 1, alpha = 1) +
   scale_color_gradient(low = "yellow", high = "red")
 
 # Animate map
@@ -98,5 +102,41 @@ q <- p + transition_reveal(id)
 
 animate(q, renderer = av_renderer('animation.mp4'))
 
+#############################
+### Map Route - Rayshader ###
+#############################
 
+# Determine map center & radius
+.lat <- (max(route_df$location.lat)-min(route_df$location.lat))/2 + min(route_df$location.lat)
+.long <- (max(route_df$location.lng)-min(route_df$location.lng))/2 + min(route_df$location.lng)
+
+.radius <- max(distm(c(.long, .lat), c(.long, max(route_df$location.lat)), fun = distHaversine),
+               distm(c(.long, .lat), c(max(route_df$location.lng),.lat), fun = distHaversine))
+.radius <- .radius * 1.5 # add some buffer
+
+# Adjusted elevation (so sits above terrain - gps elevation errors sometimes make sections disappear)
+route_df$elevation_adj <- (route_df$elevation + 20)
+
+# Render 3d map
+vancouver <- plot_3d_vista(lat = .lat, long = .long, radius=.radius, phi=30, zoom=0.5, fov = 30, theta = -15, zscale=5, windowsize = c(1200, 800))
+
+# Add Strava Route
+render_path(extent = attr(vancouver,"extent"),
+            lat = route_df$location.lat, long = route_df$location.lng,
+            altitude = route_df$elevation_adj, zscale=5,color="red", antialias=TRUE)
+
+# Add Start and Finish Labels
+render_label(vancouver,lat = route_df$location.lat[1], long = route_df$location.lng[1],
+             extent = attr(vancouver, "extent"),
+             zscale=5, textcolor="black", linecolor="black", text = "Start")
+
+render_label(vancouver,lat = route_df$location.lat[length(route_df$location.lat)], long = route_df$location.lng[length(route_df$location.lng)],
+             extent = attr(vancouver, "extent"),
+             zscale=5, textcolor="black", linecolor="black", text = "Finish")
+
+# Render Movie
+render_movie(filename="vancouver", theta = -15, zoom=0.5, fov=30)
+
+# ...or Render a snapshot
+render_snapshot(clear=TRUE)
 
